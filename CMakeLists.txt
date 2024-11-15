@@ -1,107 +1,143 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.21)
 
-project(imnodes)
+project(
+    imnodes
+    VERSION 0.0.1
+    DESCRIPTION ""
+    HOMEPAGE_URL "https://github.com/LittleMushroom-private/imnodes"
+    LANGUAGES CXX C)
 
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
-
-
-# determine whether this is a standalone project or included by other projects
-if (NOT DEFINED IMNODES_STANDALONE_PROJECT)
-    if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-        set(IMNODES_STANDALONE_PROJECT ON)
-    else()
-        set(IMNODES_STANDALONE_PROJECT OFF)
-    endif ()
+# Only set the cxx_standard if it is not set by someone else
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 
-# cmake options
-option(IMNODES_EXAMPLES "Build examples" ${IMNODES_STANDALONE_PROJECT})
+# strongly encouraged to enable this globally to avoid conflicts between
+# -Wpedantic being enabled and -std=c++20 and -std=gnu++20 for example
+# when compiling with PCH enabled
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# allow custom imgui target name since this can vary because imgui doesn't natively include a CMakeLists.txt
-if(NOT DEFINED IMNODES_IMGUI_TARGET_NAME)
-    find_package(imgui CONFIG REQUIRED)
-    set(IMNODES_IMGUI_TARGET_NAME imgui::imgui)
+
+include(cmake/PreventInSourceBuilds.cmake)
+include(ProjectOptions.cmake)
+
+imnodes_setup_options()
+imnodes_global_options()#
+
+include(Dependencies.cmake)
+
+imnodes_setup_dependencies()
+imnodes_local_options()
+
+# don't know if this should be set globally from here or not...
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+
+set(GIT_SHA
+    "Unknown"
+    CACHE STRING "SHA this build was generated from")
+string(
+  SUBSTRING "${GIT_SHA}"
+            0
+            8
+            GIT_SHORT_SHA)
+
+target_compile_features(imnodes_options INTERFACE cxx_std_${CMAKE_CXX_STANDARD})
+
+add_library(imnodes::imnodes_options ALIAS imnodes_options)
+add_library(imnodes::imnodes_warnings ALIAS imnodes_warnings)
+
+#add_library(imnodes::imnodes_options INTERFACE IMPORTED)
+#add_library(imnodes::imnodes_warnings INTERFACE IMPORTED)
+
+# configure files based on CMake configuration options
+add_subdirectory(configured_files)
+
+include(GenerateExportHeader)
+
+add_library(imnodes src/imnodes.cpp)
+
+add_library(imnodes::imnodes ALIAS imnodes)
+
+# target_sources(imnodes PRIVATE
+#     imnodes.hpp
+#     imnodes_internal.hpp
+#     imnodes.cpp)
+
+target_link_libraries(imnodes PRIVATE imnodes::imnodes_options imnodes::imnodes_warnings imgui)
+
+target_include_directories(imnodes ${WARNING_GUARD} PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                                                                  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>)
+
+target_compile_features(imnodes PUBLIC cxx_std_20)
+
+set_target_properties(
+  imnodes
+  PROPERTIES VERSION ${PROJECT_VERSION}
+             CXX_VISIBILITY_PRESET hidden
+             VISIBILITY_INLINES_HIDDEN YES)
+
+generate_export_header(imnodes EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/imnodes/imnode_export.hpp)
+
+if(NOT BUILD_SHARED_LIBS)
+  target_compile_definitions(imnodes PUBLIC IMNODES_STATIC_DEFINE)
+endif()
+
+# Don't even look at tests if we're not top level
+if(NOT PROJECT_IS_TOP_LEVEL)
+  return()
+endif()
+
+# Adding the tests:
+include(CTest)
+
+if(BUILD_TESTING)
+  message(AUTHOR_WARNING "Building Tests. Be sure to check out test/constexpr_tests.cpp for constexpr testing")
+  add_subdirectory(test)
 endif()
 
 
+if(imnodes_BUILD_FUZZ_TESTS)
+  message(AUTHOR_WARNING "Building Fuzz Tests, using fuzzing sanitizer https://www.llvm.org/docs/LibFuzzer.html")
+  if (NOT imnodes_ENABLE_ADDRESS_SANITIZER AND NOT imnodes_ENABLE_THREAD_SANITIZER)
+    message(WARNING "You need asan or tsan enabled for meaningful fuzz testing")
+  endif()
+  add_subdirectory(fuzz_test)
+
+endif()
+
+# If MSVC is being used, and ASAN is enabled, we need to set the debugger environment
+# so that it behaves well with MSVC's debugger, and we can run the target from visual studio
 if(MSVC)
-    add_compile_definitions(SDL_MAIN_HANDLED)
-    add_compile_options(/WX)
-    # replace existing /W to avoid warning
-    if(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
-        string(REGEX REPLACE "/W[0-4]" "/W4" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    else()
-        add_compile_options(/W4)
-    endif()
-else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+  get_all_installable_targets(all_targets)
+  message("all_targets=${all_targets}")
+  set_target_properties(${all_targets} PROPERTIES VS_DEBUGGER_ENVIRONMENT "PATH=$(VC_ExecutablePath_x64);%PATH%")
 endif()
 
-# Imnodes
+# set the startup project for the "play" button in MSVC
+set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT standalone)
 
-add_library(imnodes)
-target_sources(imnodes PRIVATE
-    imnodes.h
-    imnodes_internal.h
-    imnodes.cpp)
-target_include_directories(imnodes PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(imnodes PUBLIC ${IMNODES_IMGUI_TARGET_NAME})
-
-# Example projects
-if(IMNODES_EXAMPLES)
-
-    find_package(SDL2 CONFIG REQUIRED)
-
-    add_executable(colornode
-        ${CMAKE_CURRENT_SOURCE_DIR}/imnodes.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/main.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/color_node_editor.cpp)
-    target_link_libraries(colornode imnodes SDL2::SDL2)
-    if (APPLE)
-        target_link_libraries(colornode "-framework OpenGL")
-    elseif(MSVC)
-        target_link_libraries(colornode "opengl32")
-    else()
-        target_link_libraries(colornode X11 Xext GL)
-    endif()
-
-    add_executable(multieditor
-        ${CMAKE_CURRENT_SOURCE_DIR}/imnodes.cpp 
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/main.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/multi_editor.cpp)
-    target_link_libraries(multieditor imnodes SDL2::SDL2)
-    if (APPLE)
-        target_link_libraries(multieditor "-framework OpenGL")
-    elseif(MSVC)
-        target_link_libraries(multieditor "opengl32")
-    else()
-        target_link_libraries(multieditor X11 Xext GL)
-    endif()
-
-    add_executable(saveload
-        ${CMAKE_CURRENT_SOURCE_DIR}/imnodes.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/main.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/save_load.cpp)
-    target_link_libraries(saveload imnodes SDL2::SDL2)
-    if (APPLE)
-        target_link_libraries(saveload "-framework OpenGL")
-    elseif(MSVC)
-        target_link_libraries(saveload "opengl32")
-    else()
-        target_link_libraries(saveload X11 Xext GL)
-    endif()
-
-    add_executable(hello
-        ${CMAKE_CURRENT_SOURCE_DIR}/imnodes.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/main.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/example/hello.cpp)
-    target_link_libraries(hello imnodes SDL2::SDL2)
-    if (APPLE)
-        target_link_libraries(hello "-framework OpenGL")
-    elseif(MSVC)
-        target_link_libraries(hello "opengl32")
-    else()
-        target_link_libraries(hello X11 Xext GL)
-    endif()
+if(CMAKE_SKIP_INSTALL_RULES)
+  return()
 endif()
+
+include(cmake/PackageProject.cmake)
+
+# Add other targets that you want installed here, by default we just package the one executable
+# we know we want to ship
+imnodes_package_project(
+  TARGETS
+  imnodes
+  imnodes_options
+  imnodes_warnings
+  # FIXME: this does not work! CK
+  # PRIVATE_DEPENDENCIES_CONFIGURED project_options project_warnings
+)
+
+# Experience shows that explicit package naming can help make it easier to sort
+# out potential ABI related issues before they start, while helping you
+# track a build to a specific GIT SHA
+set(CPACK_PACKAGE_FILE_NAME
+    "${CMAKE_PROJECT_NAME}-${CMAKE_PROJECT_VERSION}-${GIT_SHORT_SHA}-${CMAKE_SYSTEM_NAME}-${CMAKE_BUILD_TYPE}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}"
+)
+
+include(CPack)
