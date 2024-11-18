@@ -4,35 +4,85 @@ include(cmake/CPM.cmake)
 # CMAKE_CXX_FLAGS don't propagate out to other
 # targets
 function(imnodes_setup_dependencies)
+set(BUILD_SHARED_LIBS OFF)
+set(GLFW_BUILD_DOCS OFF)
+set(GLFW_INSTALL OFF)
 
-  # For each dependency, see if it's
-  # already been provided to us by a parent project
+if(NOT TARGET glfw)
+  # cpmaddpackage("gh:glfw/glfw#3.4")
+  CPMAddPackage(
+    NAME glfw
+    GIT_TAG 3.4
+    GITHUB_REPOSITORY "glfw/glfw"
+    OPTIONS
+    "GLFW_USE_WAYLAND=1"
+  )
+endif()
 
-  if(NOT TARGET Catch2::Catch2WithMain)
-    cpmaddpackage("gh:catchorg/Catch2@3.3.2")
-  endif()
+if(NOT TARGET imgui)
+  find_package(OpenGL REQUIRED)
 
-  if(NOT TARGET imgui)
-    cpmaddpackage("gh:Curve/imgui-cmake#master")
-    #cpmaddpackage("gh:ocornut/imgui@1.91.5")
-    # add_library(imgui STATIC
-    #   ${imgui_SOURCE_DIR}/imgui.cpp
-    #   ${imgui_SOURCE_DIR}/imgui_draw.cpp
-    #   ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    #   ${imgui_SOURCE_DIR}/imgui_tables.cpp
-    # )
-    # target_include_directories(imgui INTERFACE ${imgui_SOURCE_DIR})
-    # target_compile_definitions(imgui PUBLIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS)
-  endif()
+  # https://github.com/ocornut/imgui.git
+  CPMAddPackage(
+    NAME imgui
+    VERSION 1.91.5
+    GITHUB_REPOSITORY "ocornut/imgui"
+    OPTIONS 
+    "GLFW_BUILD_WAYLAND=1"
+    "GLFW_BUILD_X11=1"
+    #"CPM_DISABLE_BUILD=ON"
+  )
+  set(
+    IMGUI_SOURCES
 
-  #https://github.com/kfsone/imguiwrap.git
-  # if(NOT TARGET imguiwrap)
-  #   cpmaddpackage("gh:kfsone/imguiwrap@1.2.2")
-  # endif()
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui.h
+    ${imgui_SOURCE_DIR}/imconfig.h
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_internal.h
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  )
+  set(
+    IMGUI_PLATFORM_SOURCES
 
-  # https://github.com/Nelarius/imnodes.git
-  # if(NOT TARGET imnodes)
-  #   cpmaddpackage("gh:Nelarius/imnodes#master") #Bad practice implemented due to lack of version maintainence of library
-  # endif()
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_${IMGUI_PLATFORM_BACKEND}.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_${IMGUI_PLATFORM_BACKEND}.h
+  )
+  set(
+    IMGUI_RENDERER_SOURCES
+
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_${IMGUI_RENDERER_BACKEND}.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_${IMGUI_RENDERER_BACKEND}.h
+  )
+
+  add_library(
+    imgui
+
+    ${IMGUI_SOURCES}
+    ${IMGUI_PLATFORM_SOURCES}
+    ${IMGUI_RENDERER_SOURCES}
+  )
+
+  target_include_directories(
+    imgui
+
+    SYSTEM PUBLIC
+
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+    $<$<BOOL:${IMGUI_GLFW_PATH}>:${IMGUI_GLFW_PATH}/include>
+  )
+
+  target_link_libraries(
+    imgui
+
+    PUBLIC
+
+    glfw
+    OpenGL::GL
+  )
+endif()
   
 endfunction()
